@@ -15,6 +15,7 @@
 #include "ESP32_NOW.h"
 #include "WiFi.h"
 #include <esp_mac.h>                                  // For the MAC2STR and MACSTR macros
+#include "Adafruit_TCS34725.h"
 
 // Definitions
 #define ESPNOW_WIFI_IFACE WIFI_IF_STA                 // Wi-Fi interface to be used by the ESP-NOW protocol
@@ -78,6 +79,7 @@ Encoder encoder[] = {{25, 26, 0},                     // encoder 0 on GPIO 25 an
 int32_t target[] = {0, 0};                            // target encoder count for motor
 int32_t lastEncoder[] = {0, 0};                       // encoder count at last control cycle
 float targetF[] = {0.0, 0.0};                         // target for motor as float
+int servo;                                            // holds the servo value before it goes through duty cycle function
 
 // REPLACE WITH MAC ADDRESS OF YOUR CONTROLLER ESP32
 uint8_t receiverMacAddress[] = {0xAC,0x15,0x18,0xD5,0x0D,0x1C};  // MAC address of controller 00:01:02:03:04:05
@@ -157,6 +159,7 @@ void setup() {
   Serial.print("MAC address for drive "); 
   Serial.println(WiFi.macAddress());                  // print MAC address of ESP32
   
+  ledcAttach(cServoPin, 50, 16);                      // setup servo pin for 50 Hz, 16-bit resolution
   pinMode(cHeartbeatLED, OUTPUT);                     // configure built-in LED for heartbeat
   // setup motors with encoders
   for (int k = 0; k < cNumMotors; k++) {
@@ -189,6 +192,16 @@ void setup() {
   memset(&driveData, 0, sizeof(driveData));           // clear drive data
 }
 
+  if (tcs.begin()) {
+    Serial.printf("Found TCS34725 colour sensor\n");
+    tcsFlag = true;
+    digitalWrite(cTCSLED, 1);                         // turn on onboard LED 
+  } 
+  else {
+    Serial.printf("No TCS34725 found ... check your connections\n");
+    tcsFlag = false;
+  }
+
 void loop() {
 
 
@@ -205,11 +218,15 @@ void loop() {
   int pwm[] = {0, 0};                                 // motor speed(s), represented in bit resolution
   int dir[] = {1, 1};                                 // direction that motor should turn
   int lrcheck;                                        // left right check
-  
+  int servo = 90;                                     // start with the servo motor in middle position
+  ledcWrite(cServoPin, degreestodutycycle(servo));
+ 
+ 
   // if too many sequential packets have dropped, assume loss of controller, restart as safety measure
    if (commsLossCount > cMaxDroppedPackets) {
     failReboot();
   }
+
 
   // store encoder positions to avoid conflicts with ISR updates
   noInterrupts();                                     // disable interrupts temporarily while reading
@@ -219,6 +236,22 @@ void loop() {
   interrupts();                                       // turn interrupts back on
 
   uint32_t curTime = micros();                        // capture current time in microseconds
+
+  if (tcsFlag) {                                      // if colour sensor initialized
+    tcs.getRawData(&r, &g, &b, &c);                   // get raw RGBC values
+    if(r>120&&g>90&&g<115&&b>90&&b<115){              //if colour is within range
+      servo = 0;
+      ledcWrite(cServoPin, degreestodutycycle(servo));
+    }
+    else if (r>120&&g>90&&g<115&&b>90&&b<115){        // if the colour sensor detects white background of the 3d printed wall
+      servo = 90;
+      ledcWrite(cServoPin, degreestodutycycle(servo));
+    }
+    else {                                            // if the marble is wrong colour, go to the right
+      servo = 180;
+      ledcWrite(cServoPin, degreestodutycycle(servo));
+    }
+
 
   if (curTime - lastTime > 10000) {                   // wait ~10 ms
     deltaT = ((float) (curTime - lastTime)) / 1.0e6;  // compute actual time interval in seconds
@@ -357,6 +390,19 @@ void failReboot() {
   delay(3000);
   ESP.restart();
 }
+
+
+long degreesToDutyCycle(int deg) {
+  long dutyCycle = map(deg, 0, 180, cMinDutyCycle, cMaxDutyCycle);  // convert to duty cycle
+#ifdef OUTPUT_ON
+  float percent = dutyCycle * 0.0015259;              // dutyCycle / 65535 * 100
+  
+  //Serial.printf("Degrees %d, Duty Cycle Val: %ld = %f%%\n", servoPos, dutyCycle, percent);
+#endif
+  return dutyCycle;
+
+}
+
 
 // encoder interrupt service routine
 // argument is pointer to an encoder structure, which is statically cast to a Encoder structure, allowing multiple
