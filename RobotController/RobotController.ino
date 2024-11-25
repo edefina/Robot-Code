@@ -28,6 +28,7 @@ typedef struct {
   uint32_t time;                                      // time packet sent
   double speed;                                       // sends the reading of the speed potentiometer
   double leftright;                                   // sends the reading of the left-right 
+  int gate;                                           // Reads the value for the gate to be open or closed
 } __attribute__((packed)) esp_now_control_data_t;
 
 // Drive data packet structure
@@ -65,7 +66,9 @@ uint32_t lastHeartbeat = 0;                           // time of last heartbeat 
 uint32_t lastTime = 0;                                // last time of motor control was updated
 uint32_t commsLossCount = 0;                          // number of sequential sent packets have dropped
 Button buttonPower = {14, 0, 0, false, true, true};   // On/Off button
+Button buttonGate = {13, 0, 0, false, true, true};    // gate servo button
 int Switch = 0;                                       // makes the button act as a switch, keeps track of presses
+int Switch2 = 0;                                      // makes gate button act as a switch, keeps track of presses
 int speed2 = 0;                                       // for reading the value of the speed potentiometer for trouble shooting
 int leftright2 = 0;                                   // for reading the value of the left-right potentiometer for trouble shooting
 
@@ -148,8 +151,11 @@ void setup() {
   // Configure GPIO
   pinMode(cHeartbeatLED, OUTPUT);                     // configure built-in LED for heartbeat as output
   pinMode(cStatusLED, OUTPUT);                        // configure GPIO for communication status LED as output
-  pinMode(buttonPower.pin, INPUT_PULLUP);               // configure GPIO for forward button pin as an input with pullup resistor
-  attachInterruptArg(buttonPower.pin, buttonISR, &buttonPower, CHANGE); // Configure forward pushbutton ISR to trigger on change
+  pinMode(buttonPower.pin, INPUT_PULLUP);             // configure GPIO for power button pin as an input with pullup resistor
+  pinMode(buttonGate.pin, INPUT_PULLUP);              // configure GPIO for gate button pin as an input with pullup resistor =
+  attachInterruptArg(buttonPower.pin, buttonISR, &buttonPower, CHANGE); // Configure power pushbutton ISR to trigger on change
+  attachInterruptArg(buttonGate.pin, buttonISR, &buttonGate, CHANGE);   // Configure gate pushbutton ISR to trigger on change
+
 
   // Initialize the ESP-NOW protocol
   if (!ESP_NOW.begin()) {
@@ -190,7 +196,21 @@ void loop() {
       digitalWrite(cStatusLED, 1);                    // turn on LED to show that the power button is "on"
       Serial.printf("Speed: %d\n", speed2);           // print the speed reading for troubleshooting
       Serial.printf("leftright: %d\n\n", leftright2); // print the left-right reading for troubleshooting
+      
+      if (!buttonGate.state){                         // if the gate button has been pressed
+        Switch2 = !Switch2;
       }
+
+        if (Switch2 == 1){                            // and if switch2 is set to 1, send a value of 1 to open the gate
+          controlData.gate = 1;
+          Serial.printf("Gate: Open");
+        }
+        else {                                        // for any other value of switch2, close the gate
+          controlData.gate = 0;
+          Serial.printf("Gate: Closed");
+        }
+      }
+
       else if (Switch == 0) {                         // if power is off
         digitalWrite(cStatusLED, 0);                  // turn off the led
         controlData.speed = 2047;                     // set speed to 2047 (which means the motors are not moving, as anything under 2047 is reverse)
@@ -199,6 +219,7 @@ void loop() {
         leftright2 = 0;                               // for troubleshooting
         Serial.printf("Speed: %d\n", speed2);         // for troubleshooting
         Serial.printf("leftright: %d\n\n", leftright2); // for troubleshooting
+        controlData.gate = 0;
       }
 
     if (commsLossCount > cMaxDroppedPackets) { // if drive appears disconnected, update control signal to stop before sending

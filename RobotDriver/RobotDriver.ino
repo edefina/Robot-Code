@@ -7,6 +7,7 @@
 //  Date:     2024 10 07
 //
 
+#define PRINT_COLOUR                                  // uncomment to turn on output of colour sensor data
 // #define SERIAL_STUDIO                                 // print formatted string, that can be captured and parsed by Serial-Studio
 // #define PRINT_SEND_STATUS                             // uncomment to turn on output packet send status
 // #define PRINT_INCOMING                                // uncomment to turn on output of incoming data
@@ -30,6 +31,7 @@ typedef struct {
   uint32_t time;                                      // time packet sent
   double speed;                                       // to read potentiometer value
   double leftright;                                   // Reads the left right potentiometer
+  int gate;                                           // Reads the value for the gate to be open or closed
 } __attribute__((packed)) esp_now_control_data_t;
 
 // Drive data packet structure
@@ -58,6 +60,7 @@ const int cHeartbeatInterval = 500;                   // heartbeat blink interva
 const int cNumMotors = 2;                             // Number of DC motors
 const int cIN1Pin[] = {17, 19};                       // GPIO pin(s) for INT1
 const int cIN2Pin[] = {16, 18};                       // GPIO pin(s) for INT2
+const int cINOUTMotor3Pin[] = {15, 14};               // GPIO pins (both 1 and 2) for just the conveyor belt motor
 const int cPWMRes = 8;                                // bit resolution for PWM
 const int cMinPWM = 0;                                // PWM value for minimum speed that turns motor
 const int cMaxPWM = pow(2, cPWMRes) - 1;              // PWM value for maximum speed
@@ -69,17 +72,25 @@ const int cMaxDroppedPackets = 20;                    // maximum number of packe
 const float cKp = 1.5;                                // proportional gain for PID
 const float cKi = 0.2;                                // integral gain for PID
 const float cKd = 0.8;                                // derivative gain for PID
+const int cServoPin1 = 4;                             // GPIO Pin for sorting servo motor
+const int cServoPin2 = 5;                             // GPIO Pin for gate servo motor
+const int cTCSLED = 23;                               // GPIO pin for LED on TCS34725
+const long cMinDutyCycle = 1650;                      // duty cycle for 0 degrees 
+const long cMaxDutyCycle = 8175;                      // duty cycle for 180 degrees 
+int servo1 = 90;                                      // sorting servo, start in neutral middle position
+int servo2 = 180;                                     // container gate servo, start closed
+bool servoMoved = false;                              // Flag to check if the servo has moved
 
 // Variables
 uint32_t lastHeartbeat = 0;                           // time of last heartbeat state change
 uint32_t lastTime = 0;                                // last time of motor control was updated
+uint32_t prevTime = 0;                                // last time of the sorting slider update
 uint16_t commsLossCount = 0;                          // number of sequential sent packets have dropped
 Encoder encoder[] = {{25, 26, 0},                     // encoder 0 on GPIO 25 and 26, 0 position
                      {32, 33, 0}};                    // encoder 1 on GPIO 32 and 33, 0 position
 int32_t target[] = {0, 0};                            // target encoder count for motor
 int32_t lastEncoder[] = {0, 0};                       // encoder count at last control cycle
 float targetF[] = {0.0, 0.0};                         // target for motor as float
-int servo;                                            // holds the servo value before it goes through duty cycle function
 
 // REPLACE WITH MAC ADDRESS OF YOUR CONTROLLER ESP32
 uint8_t receiverMacAddress[] = {0xAC,0x15,0x18,0xD5,0x0D,0x1C};  // MAC address of controller 00:01:02:03:04:05
@@ -146,6 +157,11 @@ public:
 // Peers
 ESP_NOW_Network_Peer *peer;
 
+// TCS34725 colour sensor with 2.4 ms integration time and gain of 4
+// see https://github.com/adafruit/Adafruit_TCS34725/blob/master/Adafruit_TCS34725.h for all possible values
+Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_2_4MS, TCS34725_GAIN_4X);
+bool tcsFlag = 0;                                     // start with the tcs flag at 0
+
 void setup() {
   Serial.begin(115200);                               // standard baud rate for ESP32 serial monitor
   while (!Serial) {                                   // wait for Serial to start
@@ -159,14 +175,19 @@ void setup() {
   Serial.print("MAC address for drive "); 
   Serial.println(WiFi.macAddress());                  // print MAC address of ESP32
   
-  ledcAttach(cServoPin, 50, 16);                      // setup servo pin for 50 Hz, 16-bit resolution
+  ledcAttach(cServoPin1, 50, 16);                      // setup servo pin for 50 Hz, 16-bit resolution
+  ledcAttach(cServoPin2, 50, 16);                      // setup servo pin for 50 Hz, 16-bit resolution
   pinMode(cHeartbeatLED, OUTPUT);                     // configure built-in LED for heartbeat
+  pinMode(cTCSLED, OUTPUT);                           // configure GPIO for control of LED on TCS34725
+
+
   // setup motors with encoders
   for (int k = 0; k < cNumMotors; k++) {
-    ledcAttach(cIN1Pin[k], cPWMFreq, cPWMRes);        // setup INT1 GPIO PWM channel
-    ledcAttach(cIN2Pin[k], cPWMFreq, cPWMRes);        // setup INT2 GPIO PWM channel
-    pinMode(encoder[k].chanA, INPUT);                 // configure GPIO for encoder channel A input
-    pinMode(encoder[k].chanB, INPUT);                 // configure GPIO for encoder channel B input
+    ledcAttach(cIN1Pin[k], cPWMFreq, cPWMRes);          // setup INT1 GPIO PWM channel
+    ledcAttach(cIN2Pin[k], cPWMFreq, cPWMRes);          // setup INT2 GPIO PWM channel
+    ledcAttach(cINOUTMotor3Pin[k], cPWMFreq, cPWMRes);  // setup INT1 and 2 GPIO PWM Channel for the sorter motor
+    pinMode(encoder[k].chanA, INPUT);                   // configure GPIO for encoder channel A input
+    pinMode(encoder[k].chanB, INPUT);                   // configure GPIO for encoder channel B input
     // configure encoder to trigger interrupt with each rising edge on channel A
     attachInterruptArg(encoder[k].chanA, encoderISR, &encoder[k], RISING);
   }
@@ -190,17 +211,19 @@ void setup() {
   }
   memset(&inData, 0, sizeof(inData));                 // clear controller data
   memset(&driveData, 0, sizeof(driveData));           // clear drive data
-}
 
-  if (tcs.begin()) {
+
+  if (tcs.begin()) {                                  // if the tcs sensor successfully initializes
     Serial.printf("Found TCS34725 colour sensor\n");
-    tcsFlag = true;
+    tcsFlag = true;                                   // set flag to true
     digitalWrite(cTCSLED, 1);                         // turn on onboard LED 
   } 
-  else {
+  else {                                                              //otherwise set flag to false and display message
     Serial.printf("No TCS34725 found ... check your connections\n");
     tcsFlag = false;
   }
+}
+
 
 void loop() {
 
@@ -217,11 +240,10 @@ void loop() {
   float u[] = {0, 0};                                 // PID control signal
   int pwm[] = {0, 0};                                 // motor speed(s), represented in bit resolution
   int dir[] = {1, 1};                                 // direction that motor should turn
-  int lrcheck;                                        // left right check
-  int servo = 90;                                     // start with the servo motor in middle position
-  ledcWrite(cServoPin, degreestodutycycle(servo));
+
  
- 
+  //setMotor(1, 200, 15, 14);                           // set the belt motor to constantly move
+
   // if too many sequential packets have dropped, assume loss of controller, restart as safety measure
    if (commsLossCount > cMaxDroppedPackets) {
     failReboot();
@@ -237,21 +259,6 @@ void loop() {
 
   uint32_t curTime = micros();                        // capture current time in microseconds
 
-  if (tcsFlag) {                                      // if colour sensor initialized
-    tcs.getRawData(&r, &g, &b, &c);                   // get raw RGBC values
-    if(r>120&&g>90&&g<115&&b>90&&b<115){              //if colour is within range
-      servo = 0;
-      ledcWrite(cServoPin, degreestodutycycle(servo));
-    }
-    else if (r>120&&g>90&&g<115&&b>90&&b<115){        // if the colour sensor detects white background of the 3d printed wall
-      servo = 90;
-      ledcWrite(cServoPin, degreestodutycycle(servo));
-    }
-    else {                                            // if the marble is wrong colour, go to the right
-      servo = 180;
-      ledcWrite(cServoPin, degreestodutycycle(servo));
-    }
-
 
   if (curTime - lastTime > 10000) {                   // wait ~10 ms
     deltaT = ((float) (curTime - lastTime)) / 1.0e6;  // compute actual time interval in seconds
@@ -261,7 +268,68 @@ void loop() {
       velEncoder[k] = ((float) pos[k] - (float) lastEncoder[k]) / deltaT; // calculate velocity in counts/sec
       lastEncoder[k] = pos[k];                        // store encoder count for next control cycle
       velMotor[k] = velEncoder[k] / cCountsRev * 60;  // calculate motor shaft velocity in rpm
+  
+   
+ uint16_t r, g, b, c;                                // RGBC values from TCS34725
 
+  if (tcsFlag) {                                      // if colour sensor initialized
+    tcs.getRawData(&r, &g, &b, &c);                   // get raw RGBC values
+   
+   if(r>19&&r<45&&g>35&&g<63&&b>26&&b<53) {                                   //if colour is within range
+      if (servoMoved == false) {
+      servo1 = 0;                                                             // send marble to container
+      ledcWrite(cServoPin1, degreesToDutyCycle(servo1));
+      prevTime = millis();                                                    // track time to reset flag later on instead of using delay function
+      servoMoved = true;                                                      // set servoMoved flag to true so that the motor won't be moved until a set time has passed 
+      }
+    }
+    else if (r>207&&r<240&&g>266&&g<315&&b>220&&b<275&&c>700&&c<820) {        // if the colour sensor detects white background of the 3d printed wall when it is pressed against the sensor
+      if (servoMoved == false) {
+      servo1 = 90;                                                            // keep it centered
+      ledcWrite(cServoPin1, degreesToDutyCycle(servo1));
+      prevTime = millis();
+      servoMoved = true;
+      }
+    }
+    else if (r>40&&r<60&&g>55&&g<72&&b>45&&b<60&&c>150&&c<176) {        // if the colour sensor detects white background of the 3d printed wall when it is centered and empty
+      if (servoMoved == false) {
+      servo1 = 90;                                                      // keep it centered
+      ledcWrite(cServoPin1, degreesToDutyCycle(servo1));
+      prevTime = millis();
+      servoMoved = true;
+      }
+    }
+    else {                                                              // if the marble is wrong colour, dispose off the side of chassis
+      if (servoMoved == false) {
+      servo1 = 180;
+      ledcWrite(cServoPin1, degreesToDutyCycle(servo1));
+      prevTime = millis();
+      servoMoved = true;
+     }
+    }    
+    
+    if (servoMoved && millis() - prevTime >= 2000) {                        // reset the servoMoved flag if 0.5 seconds have passed
+        servoMoved = false;
+    }
+
+  } 
+  #ifdef PRINT_COLOUR    
+    Serial.printf("R: %d, G: %d, B: %d, C %d\n", r, g, b, c);               // for troubleshooting and calibrating
+#endif
+/*
+      if (inData.gate = 1){                                                 // open the gate if a value of 1 is sent from controller
+        servo2 = 0;
+        ledcWrite(cServoPin2, degreesToDutyCycle(servo2));
+      }
+      else if (inData.gate = 0){                                            // close the gate if a value of 0 is sent from the controller
+        servo2 = 180;
+        ledcWrite(cServoPin2, degreesToDutyCycle(servo2));
+      }
+      else {                                                                // keep gate closed if there is any other condition
+        servo2 = 180;
+        ledcWrite(cServoPin2, degreesToDutyCycle(servo2));
+      }
+  */
       if (inData.leftright<=2046) {                                          // if leftright is less than 2046, we want to turn left
         if (inData.speed<=2046) {                                            // if the speed is less than 2046, we want to go in reverse 
           pwm[1] = map(inData.speed,2046,0,cMinPWM,cMaxPWM);                 // map read speed from potentiometer to be used by setmotor
@@ -334,8 +402,8 @@ void loop() {
 
       if (commsLossCount < cMaxDroppedPackets / 4) {
         setMotor(dir[k], pwm[k], cIN1Pin[k], cIN2Pin[k]); // update motor speed and direction
-          Serial.printf("PWM[0] = %d and PWM[1] = %d \n", pwm[0], pwm[1]);          // for troubleshooting
-          Serial.printf("Dir[0] = %d and Dir[1] = %d \n", dir[0], dir[1]);          // for troubleshooting
+//          Serial.printf("PWM[0] = %d and PWM[1] = %d \n", pwm[0], pwm[1]);          // for troubleshooting
+//          Serial.printf("Dir[0] = %d and Dir[1] = %d \n", dir[0], dir[1]);          // for troubleshooting
         }
       else {
         setMotor(0, 0, cIN1Pin[k], cIN2Pin[k]);       // stop motor
