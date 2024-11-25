@@ -291,7 +291,7 @@ void loop() {
       servoMoved = true;
       }
     }
-    else if (r>40&&r<60&&g>55&&g<72&&b>45&&b<60&&c>150&&c<176) {        // if the colour sensor detects white background of the 3d printed wall when it is centered and empty
+    else if (r>40&&r<60&&g>55&&g<72&&b>45&&b<60&&c>165&&c<190) {        // if the colour sensor detects white background of the 3d printed wall when it is centered and empty
       if (servoMoved == false) {
       servo1 = 90;                                                      // keep it centered
       ledcWrite(cServoPin1, degreesToDutyCycle(servo1));
@@ -308,7 +308,7 @@ void loop() {
      }
     }    
     
-    if (servoMoved && millis() - prevTime >= 2000) {                        // reset the servoMoved flag if 0.5 seconds have passed
+    if (servoMoved && millis() - prevTime >= 1000) {                        // reset the servoMoved flag if 0.5 seconds have passed
         servoMoved = false;
     }
 
@@ -316,12 +316,12 @@ void loop() {
   #ifdef PRINT_COLOUR    
     Serial.printf("R: %d, G: %d, B: %d, C %d\n", r, g, b, c);               // for troubleshooting and calibrating
 #endif
-/*
-      if (inData.gate = 1){                                                 // open the gate if a value of 1 is sent from controller
+
+      if (inData.gate == 1){                                                 // open the gate if a value of 1 is sent from controller
         servo2 = 0;
         ledcWrite(cServoPin2, degreesToDutyCycle(servo2));
       }
-      else if (inData.gate = 0){                                            // close the gate if a value of 0 is sent from the controller
+      else if (inData.gate == 0){                                            // close the gate if a value of 0 is sent from the controller
         servo2 = 180;
         ledcWrite(cServoPin2, degreesToDutyCycle(servo2));
       }
@@ -329,7 +329,7 @@ void loop() {
         servo2 = 180;
         ledcWrite(cServoPin2, degreesToDutyCycle(servo2));
       }
-  */
+
       if (inData.leftright<=2046) {                                          // if leftright is less than 2046, we want to turn left
         if (inData.speed<=2046) {                                            // if the speed is less than 2046, we want to go in reverse 
           pwm[1] = map(inData.speed,2046,0,cMinPWM,cMaxPWM);                 // map read speed from potentiometer to be used by setmotor
