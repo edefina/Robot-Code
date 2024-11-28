@@ -67,14 +67,11 @@ const int cMaxDroppedPackets = 20;                    // maximum number of packe
 const float cKp = 1.5;                                // proportional gain for PID
 const float cKi = 0.2;                                // integral gain for PID
 const float cKd = 0.8;                                // derivative gain for PID
-const int cServoPin1 = 4;                             // GPIO Pin for sorting servo motor
-const int cServoPin2 = 5;                             // GPIO Pin for gate servo motor
+const int cServoPin2 = 27;                            // GPIO Pin for gate servo motor
 const int cTCSLED = 23;                               // GPIO pin for LED on TCS34725
 const long cMinDutyCycle = 1650;                      // duty cycle for 0 degrees 
 const long cMaxDutyCycle = 8175;                      // duty cycle for 180 degrees 
-int servo1 = 90;                                      // sorting servo, start in neutral middle position
-int servo2 = 180;                                     // container gate servo, start closed
-bool servoMoved = false;                              // Flag to check if the servo has moved
+int servo2;                                           // container gate servo, start closed
 
 // Variables
 uint32_t lastHeartbeat = 0;                           // time of last heartbeat state change
@@ -170,7 +167,6 @@ void setup() {
   Serial.print("MAC address for drive "); 
   Serial.println(WiFi.macAddress());                  // print MAC address of ESP32
   
-  ledcAttach(cServoPin1, 50, 16);                      // setup servo pin for 50 Hz, 16-bit resolution
   ledcAttach(cServoPin2, 50, 16);                      // setup servo pin for 50 Hz, 16-bit resolution
   pinMode(cHeartbeatLED, OUTPUT);                     // configure built-in LED for heartbeat
   pinMode(cTCSLED, OUTPUT);                           // configure GPIO for control of LED on TCS34725
@@ -180,7 +176,6 @@ void setup() {
   for (int k = 0; k < cNumMotors; k++) {
     ledcAttach(cIN1Pin[k], cPWMFreq, cPWMRes);          // setup INT1 GPIO PWM channel
     ledcAttach(cIN2Pin[k], cPWMFreq, cPWMRes);          // setup INT2 GPIO PWM channel
-    ledcAttach(cINOUTMotor3Pin[k], cPWMFreq, cPWMRes);  // setup INT1 and 2 GPIO PWM Channel for the sorter motor
     pinMode(encoder[k].chanA, INPUT);                   // configure GPIO for encoder channel A input
     pinMode(encoder[k].chanB, INPUT);                   // configure GPIO for encoder channel B input
     // configure encoder to trigger interrupt with each rising edge on channel A
@@ -207,18 +202,7 @@ void setup() {
   memset(&inData, 0, sizeof(inData));                 // clear controller data
   memset(&driveData, 0, sizeof(driveData));           // clear drive data
 
-
-  if (tcs.begin()) {                                  // if the tcs sensor successfully initializes
-    Serial.printf("Found TCS34725 colour sensor\n");
-    tcsFlag = true;                                   // set flag to true
-    digitalWrite(cTCSLED, 1);                         // turn on onboard LED 
-  } 
-  else {                                                              //otherwise set flag to false and display message
-    Serial.printf("No TCS34725 found ... check your connections\n");
-    tcsFlag = false;
-  }
 }
-
 
 void loop() {
 
@@ -264,79 +248,33 @@ void loop() {
       lastEncoder[k] = pos[k];                        // store encoder count for next control cycle
       velMotor[k] = velEncoder[k] / cCountsRev * 60;  // calculate motor shaft velocity in rpm
   
-   
- uint16_t r, g, b, c;                                // RGBC values from TCS34725
-
-  
-  if (tcsFlag) {                                      // if colour sensor initialized
-    tcs.getRawData(&r, &g, &b, &c);                   // get raw RGBC values
-   
-   if(r>19&&r<45&&g>35&&g<63&&b>26&&b<53) {                                   //if colour is within range
-      if (servoMoved == false) {
-      servo1 = 0;                                                             // send marble to container
-      ledcWrite(cServoPin1, degreesToDutyCycle(servo1));
-      prevTime = millis();                                                    // track time to reset flag later on instead of using delay function
-      servoMoved = true;                                                      // set servoMoved flag to true so that the motor won't be moved until a set time has passed 
-      }
-    }
-    else if (r>207&&r<240&&g>266&&g<315&&b>220&&b<275&&c>700&&c<820) {        // if the colour sensor detects white background of the 3d printed wall when it is pressed against the sensor
-      if (servoMoved == false) {
-      servo1 = 90;                                                            // keep it centered
-      ledcWrite(cServoPin1, degreesToDutyCycle(servo1));
-      prevTime = millis();
-      servoMoved = true;
-      }
-    }
-    else if (r>40&&r<60&&g>52&&g<66&&b>45&&b<60&&c>160&&c<190) {        // if the colour sensor detects white background of the 3d printed wall when it is centered and empty
-      if (servoMoved == false) {
-      servo1 = 90;                                                      // keep it centered
-      ledcWrite(cServoPin1, degreesToDutyCycle(servo1));
-      prevTime = millis();
-      servoMoved = true;
-      }
-    }
-    else {                                                              // if the marble is wrong colour, dispose off the side of chassis
-      if (servoMoved == false) {
-      servo1 = 180;
-      ledcWrite(cServoPin1, degreesToDutyCycle(servo1));
-      prevTime = millis();
-      servoMoved = true;
-     }
-    }    
-    
-    if (servoMoved && millis() - prevTime >= 1000) {                        // reset the servoMoved flag if 0.5 seconds have passed
-        servoMoved = false;
-    }
-
-  } 
-  #ifdef PRINT_COLOUR    
-    Serial.printf("R: %d, G: %d, B: %d, C %d\n", r, g, b, c);               // for troubleshooting and calibrating
-#endif
-
       if (inData.gate == 1){                                                 // open the gate if a value of 1 is sent from controller
         servo2 = 0;
         ledcWrite(cServoPin2, degreesToDutyCycle(servo2));
+      Serial.printf("Gate should be open\n");
       }
       else if (inData.gate == 0){                                            // close the gate if a value of 0 is sent from the controller
         servo2 = 180;
         ledcWrite(cServoPin2, degreesToDutyCycle(servo2));
+      Serial.printf("Gate should be closed V1\n");
       }
       else {                                                                // keep gate closed if there is any other condition
         servo2 = 180;
         ledcWrite(cServoPin2, degreesToDutyCycle(servo2));
+      Serial.printf("Gate should be closed V2\n");
       }
 
       if (inData.leftright<=2046) {                                          // if leftright is less than 2046, we want to turn left
         if (inData.speed<=2046) {                                            // if the speed is less than 2046, we want to go in reverse 
           pwm[0] = map(inData.speed,2046,0,cMinPWM,cMaxPWM);                 // map read speed from potentiometer to be used by setmotor
-          pwm[1] = map(inData.leftright,0,2046,cMinPWM, pwm[1]);             // map the left motor to scale between 0 and the other motor speed depending on how far the leftright potentiometer is turned 
+          pwm[1] = map(inData.leftright,0,2046,cMinPWM, pwm[0]);             // map the left motor to scale between 0 and the other motor speed depending on how far the leftright potentiometer is turned 
           dir[1]=-1;                                                          // because one motor is upsidedown compared to the other, motor [0] must be -1 and [1] must be 1 for it to drive reverse
           dir[0]=1;
 
       }
         else if (inData.speed>=2048){                                        // if speed is greater than 2048 we want to go forward
           pwm[0] = map(inData.speed,2048,4095,cMinPWM,cMaxPWM);              // map read speed from potentiometer to be used by setmotor
-          pwm[1] = map(inData.leftright,0,2046,cMinPWM, pwm[1]);             // map the left motor to scale between 0 and right motor speed depending on how far leftright potentiometer is turned
+          pwm[1] = map(inData.leftright,0,2046,cMinPWM, pwm[0]);             // map the left motor to scale between 0 and right motor speed depending on how far leftright potentiometer is turned
           dir[1]=1;                                                          // because one motor is upsidedown compared to the other, motor [0] must be 1 and [1] must be -1 for it to drive forward
           dir[0]=-1;  
         }
@@ -351,13 +289,13 @@ void loop() {
       else if (inData.leftright>=2048){                                            // if leftright dial is greater than 2048, we want to turn right 
           if (inData.speed>=2048){                                                 // speed is greater than 2048, so we move forward
              pwm[1] = map(inData.speed,2048,4095,cMinPWM,cMaxPWM);                 // map the speed from min to max pwm depending on how far right the speed dial is 
-             pwm[0] = map(inData.leftright,2048,4095,pwm[0], 0);                   // map the right motor to how far the leftright dial is turned right. Match it with the left motor as an extreme 
+             pwm[0] = map(inData.leftright,2048,4095,pwm[1], 0);                   // map the right motor to how far the leftright dial is turned right. Match it with the left motor as an extreme 
              dir[1]=1;                                                             // these directions correspond with moving forward
              dir[0]=-1; 
           }
           else if (inData.speed<=2046){                                            // moving backwards
              pwm[1] = map(inData.speed,2046,0,cMinPWM,cMaxPWM);                    // map the speed of left motor 
-             pwm[0] = map(inData.leftright,2048,4095,pwm[0], 0);                   // map the right motor to range between 0 and the left motor's speed
+             pwm[0] = map(inData.leftright,2048,4095,pwm[1], 0);                   // map the right motor to range between 0 and the left motor's speed
              dir[1]=-1;                                                             // these directions correspond with reverse
              dir[0]=1; 
           }
