@@ -60,15 +60,15 @@ const int cHeartbeatInterval = 500;                   // heartbeat blink interva
 const int cStatusLED = 26;                            // GPIO pin of communication status LED
 const int cDebounceDelay = 20;                        // button debounce delay in milliseconds
 const int cMaxDroppedPackets = 20;                    // maximum number of packets allowed to drop
+const int powerswitch = 14;                           // power switch connected to pin 14
+const int gateswitch = 13;                            // power switch connected to pin 13
 
 // Variables
 uint32_t lastHeartbeat = 0;                           // time of last heartbeat state change
 uint32_t lastTime = 0;                                // last time of motor control was updated
 uint32_t commsLossCount = 0;                          // number of sequential sent packets have dropped
-Button buttonPower = {14, 0, 0, false, true, true};   // On/Off button
-Button buttonGate = {13, 0, 0, false, true, true};    // gate servo button
 int Switch = 0;                                       // makes the button act as a switch, keeps track of presses
-int Switch2 = 0;                                      // makes gate button act as a switch, keeps track of presses
+int Switch2 = 0;                                      // tracks state of the gate switch
 int speed2 = 0;                                       // for reading the value of the speed potentiometer for trouble shooting
 int leftright2 = 0;                                   // for reading the value of the left-right potentiometer for trouble shooting
 
@@ -151,10 +151,9 @@ void setup() {
   // Configure GPIO
   pinMode(cHeartbeatLED, OUTPUT);                     // configure built-in LED for heartbeat as output
   pinMode(cStatusLED, OUTPUT);                        // configure GPIO for communication status LED as output
-  pinMode(buttonPower.pin, INPUT_PULLUP);             // configure GPIO for power button pin as an input with pullup resistor
-  pinMode(buttonGate.pin, INPUT_PULLUP);              // configure GPIO for gate button pin as an input with pullup resistor =
-  attachInterruptArg(buttonPower.pin, buttonISR, &buttonPower, CHANGE); // Configure power pushbutton ISR to trigger on change
-  attachInterruptArg(buttonGate.pin, buttonISR, &buttonGate, CHANGE);   // Configure gate pushbutton ISR to trigger on change
+  pinMode(powerswitch, INPUT);                        // configure GPIO for power switch as an input
+  pinMode(gateswitch, INPUT);                         // configure GPIO for gate switch as an input 
+  
 
 
   // Initialize the ESP-NOW protocol
@@ -185,10 +184,10 @@ void loop() {
     lastTime = curTime;
     controlData.time = curTime;                       // update transmission time
   
-  if (!buttonPower.state) {                           // checks if the power button has been pressed
-      Switch = !Switch;                               // keeps track of the last state of the button
-  }
-      if (Switch == 1) {                              // if the power button is "on"
+  Switch = digitalRead(powerswitch);
+
+  if (Switch == HIGH) {                           // checks if the power button has been pressed                              
+
       controlData.speed = analogRead(34);             // read the speed potentiometer and store it in controlData to be sent
       speed2 = analogRead(34);                        // for troubleshooting
       controlData.leftright = analogRead (32);        // read the left-right potentiometer and store it in controlData to be sent
@@ -197,21 +196,19 @@ void loop() {
       Serial.printf("Speed: %d\n", speed2);           // print the speed reading for troubleshooting
       Serial.printf("leftright: %d\n\n", leftright2); // print the left-right reading for troubleshooting
       
-      if (!buttonGate.state){                         // if the gate button has been pressed
-        Switch2 = !Switch2;
-      }
+      Switch2 = digitalRead(gateswitch);
 
-        if (Switch2 == 1){                            // and if switch2 is set to 1, send a value of 1 to open the gate
-          controlData.gate = 1;
-          Serial.printf("Gate: Open");
-        }
-        else {                                        // for any other value of switch2, close the gate
+      if (Switch2 == HIGH){                         // if the gate button has been pressed
+        controlData.gate = 1;
+        Serial.printf("Gate: Open\n");
+      }
+        else if (Switch2 == LOW){                                        // for any other value of switch2, close the gate
           controlData.gate = 0;
-          Serial.printf("Gate: Closed");
+          Serial.printf("Gate: Closed\n");
         }
       }
 
-      else if (Switch == 0) {                         // if power is off
+      else if (Switch == LOW) {                         // if power is off
         digitalWrite(cStatusLED, 0);                  // turn off the led
         controlData.speed = 2047;                     // set speed to 2047 (which means the motors are not moving, as anything under 2047 is reverse)
         controlData.leftright = 2047;                 // set left right to 2047 which sets the motors to equal
