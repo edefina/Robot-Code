@@ -266,17 +266,17 @@ void loop() {
 
       if (inData.leftright<=2046) {                                          // if leftright is less than 2046, we want to turn left
         if (inData.speed<=2046) {                                            // if the speed is less than 2046, we want to go in reverse 
-          pwm[0] = map(inData.speed,2046,0,cMinPWM,cMaxPWM);                 // map read speed from potentiometer to be used by setmotor
-          pwm[1] = map(inData.leftright,0,2046,cMinPWM, pwm[0]);             // map the left motor to scale between 0 and the other motor speed depending on how far the leftright potentiometer is turned 
-          dir[1]=-1;                                                          // because one motor is upsidedown compared to the other, motor [0] must be -1 and [1] must be 1 for it to drive reverse
-          dir[0]=1;
+          pwm[1] = map(inData.speed,2046,0,cMinPWM,cMaxPWM);                 // map read speed from potentiometer to be used by setmotor
+          pwm[0] = map(inData.leftright,0,2046,cMinPWM, pwm[1]);             // map the left motor to scale between 0 and the other motor speed depending on how far the leftright potentiometer is turned 
+          dir[1]=1;                                                          // because one motor is upsidedown compared to the other, motor [0] must be -1 and [1] must be 1 for it to drive reverse
+          dir[0]=-1;
 
       }
         else if (inData.speed>=2048){                                        // if speed is greater than 2048 we want to go forward
-          pwm[0] = map(inData.speed,2048,4095,cMinPWM,cMaxPWM);              // map read speed from potentiometer to be used by setmotor
-          pwm[1] = map(inData.leftright,0,2046,cMinPWM, pwm[0]);             // map the left motor to scale between 0 and right motor speed depending on how far leftright potentiometer is turned
-          dir[1]=1;                                                          // because one motor is upsidedown compared to the other, motor [0] must be 1 and [1] must be -1 for it to drive forward
-          dir[0]=-1;  
+          pwm[1] = map(inData.speed,2048,4095,cMinPWM,cMaxPWM);              // map read speed from potentiometer to be used by setmotor
+          pwm[0] = map(inData.leftright,0,2046,cMinPWM, pwm[1]);             // map the left motor to scale between 0 and right motor speed depending on how far leftright potentiometer is turned
+          dir[0]=1;                                                          // because one motor is upsidedown compared to the other, motor [0] must be 1 and [1] must be -1 for it to drive forward
+          dir[1]=-1;  
         }
         else if (inData.speed=2047) {                                        // if speed dial is right in the middle, dont move at all.
           pwm[0] = 0;
@@ -288,16 +288,16 @@ void loop() {
 
       else if (inData.leftright>=2048){                                            // if leftright dial is greater than 2048, we want to turn right 
           if (inData.speed>=2048){                                                 // speed is greater than 2048, so we move forward
-             pwm[1] = map(inData.speed,2048,4095,cMinPWM,cMaxPWM);                 // map the speed from min to max pwm depending on how far right the speed dial is 
-             pwm[0] = map(inData.leftright,2048,4095,pwm[1], 0);                   // map the right motor to how far the leftright dial is turned right. Match it with the left motor as an extreme 
-             dir[1]=1;                                                             // these directions correspond with moving forward
-             dir[0]=-1; 
+             pwm[0] = map(inData.speed,2048,4095,cMinPWM,cMaxPWM);                 // map the speed from min to max pwm depending on how far right the speed dial is 
+             pwm[1] = map(inData.leftright,2048,4095,pwm[0], 0);                   // map the right motor to how far the leftright dial is turned right. Match it with the left motor as an extreme 
+             dir[0]=1;                                                             // these directions correspond with moving forward
+             dir[1]=-1; 
           }
           else if (inData.speed<=2046){                                            // moving backwards
-             pwm[1] = map(inData.speed,2046,0,cMinPWM,cMaxPWM);                    // map the speed of left motor 
-             pwm[0] = map(inData.leftright,2048,4095,pwm[1], 0);                   // map the right motor to range between 0 and the left motor's speed
-             dir[1]=-1;                                                             // these directions correspond with reverse
-             dir[0]=1; 
+             pwm[0] = map(inData.speed,2046,0,cMinPWM,cMaxPWM);                    // map the speed of left motor 
+             pwm[1] = map(inData.leftright,2048,4095,pwm[0], 0);                   // map the right motor to range between 0 and the left motor's speed
+             dir[0]=-1;                                                             // these directions correspond with reverse
+             dir[1]=1; 
           }
           else if (inData.speed=2047){                                             // if speed dial is set to 2047, set all pwm and dir to 0
             pwm[0]=0;

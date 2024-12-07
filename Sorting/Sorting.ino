@@ -18,7 +18,7 @@ const int cPWMRes = 8;                                // bit resolution for PWM
 const int cMinPWM = 0;                                // PWM value for minimum speed that turns motor
 const int cMaxPWM = pow(2, cPWMRes) - 1;              // PWM value for maximum speed
 const int cPWMFreq = 20000;                           // frequency of PWM signal
-const int cServoPin1 = 4;                             // GPIO Pin for sorting servo motor
+const int cServoPin1 = 15;                            // GPIO Pin for sorting servo motor
 const int cTCSLED = 23;                               // GPIO pin for LED on TCS34725
 const long cMinDutyCycle = 1650;                      // duty cycle for 0 degrees 
 const long cMaxDutyCycle = 8175;                      // duty cycle for 180 degrees 
@@ -36,6 +36,11 @@ Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_2_4MS, TCS347
 bool tcsFlag = 0;                                     // start with the tcs flag at 0
 
 void setup() {
+
+Serial.begin(115200);                               // standard baud rate for ESP32 serial monitor
+  while (!Serial) {                                   // wait for Serial to start
+    delay(10);                                        // okay to delay during setup
+  }
   // put your setup code here, to run once:
   ledcAttach(cServoPin1, 50, 16);                      // setup servo pin for 50 Hz, 16-bit resolution
   pinMode(cHeartbeatLED, OUTPUT);                     // configure built-in LED for heartbeat
@@ -98,7 +103,7 @@ void loop() {
     }
     else {                                                              // if the marble is wrong colour, dispose off the side of chassis
       if (servoMoved == false) {
-      servo1 = 180;
+      servo1 = 120;
       ledcWrite(cServoPin1, degreesToDutyCycle(servo1));
       prevTime = millis();
       servoMoved = true;
@@ -106,7 +111,7 @@ void loop() {
      }
     }    
     
-    if (servoMoved && millis() - prevTime >= 1000) {                        // reset the servoMoved flag if 0.5 seconds have passed
+    if (servoMoved && millis() - prevTime >= 500) {                        // reset the servoMoved flag if 0.5 seconds have passed
         servoMoved = false;
     }
 
